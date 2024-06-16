@@ -46,12 +46,15 @@ interface Shape {
 
 interface Selection {
     coordinates: Point;
+    top: number;
+    left: number;
     height: number;
     width: number;
     active: boolean;
 }
 
 const WheelButton: number = 1;
+const maxZoom: number = 8;
 
 const optionIcons: { [key in ModeType]: string } = {
     draw: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30" fill="none"><path stroke="#000" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m4.636 23.182 1.599-3.73a.5.5 0 0 1 .106-.157L22.636 3 27 7.364 10.705 23.659a.5.5 0 0 1-.157.106l-3.73 1.599m-2.182-2.182L3 27l3.818-1.636m-2.182-2.182 2.182 2.182"/><path fill="#000" d="m3 27 1.714-4L7 25.286z"/></svg>`,
@@ -73,7 +76,7 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
     const [shapes, setShapes] = useState<Shape[]>([]);
     const [UIvisibility, setUIvisibility] = useState<boolean>(hideUI);
     const [zoom, setZoom] = useState<number>(1);
-    const [selection, setSelection] = useState<Selection>({ active: false, coordinates: { x: 0, y: 0 }, height: 0, width: 0 });
+    const [selection, setSelection] = useState<Selection>({ left: 0, top: 0, active: false, coordinates: { x: 0, y: 0 }, height: 0, width: 0 });
 
     const pushShape = useCallback((path: Path) => {
         const shape: Shape = {
@@ -116,6 +119,8 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
                 setSelection({
                     ...selection,
                     active: true,
+                    top: event.offsetY,
+                    left: event.offsetX,
                     coordinates: {
                         x: event.offsetX,
                         y: event.offsetY
@@ -145,7 +150,7 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
             setShapes(filteredShapes);
 
         } else if (mode === ModeType.Select) {
-            setSelection({ active: false, coordinates: { x: 0, y: 0 }, height: 0, width: 0 });
+            setSelection({ left: 0, top: 0, active: false, coordinates: { x: 0, y: 0 }, height: 0, width: 0 });
         }
         setStartPos(null);
     }, [currentPath, mode, paths, pushShape, shapes]);
@@ -226,12 +231,34 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
 
         } else if (mode === ModeType.Select && selection.active) {
             console.log(selection)
+
+            const { x, y } = selection.coordinates;
+            let width:number = 0;
+            let height:number = 0;
+            let top:number = y;
+            let left:number = x;
+            if (adjustedX < x) {
+                left = adjustedX;
+                width = x - adjustedX;
+            } else {
+                width = adjustedX - x;
+            }
+            if (adjustedY < y) {
+                top = adjustedY;
+                height = y - adjustedY;
+            } else {
+                height = adjustedY - y;
+            }
             setSelection({
-                ...selection, width: adjustedX - selection.coordinates.x,
-                height: adjustedY - selection.coordinates.y });
+                ...selection,
+                width,
+                height,
+                top,
+                left
+            });
         }
 
-    }, [color, currentPath, lineWidth, mode, panOffset.x, panOffset.y, selection, shapes, startPos, straightPath]);
+    }, [color, currentPath, lineWidth, mode, panOffset.x, panOffset.y, selection, shapes, startPos, straightPath, zoom]);
 
     const handleKeyDown = useCallback((event: KeyboardEvent) => {
         const {key, code, ctrlKey} = event;
@@ -308,14 +335,14 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
 
         const scaleFactor = 1.1;
         const zoomIn = event.deltaY < 0;
-        const newZoom = zoomIn ? zoom * scaleFactor : zoom / scaleFactor;
+        const newZoom = Math.min(maxZoom, Math.max(0.1, zoomIn ? zoom * scaleFactor : zoom / scaleFactor));
 
         const mouseX = event.clientX;
         const mouseY = event.clientY;
 
         // Adjust the pan offset to keep the zoom centered around the mouse position
-        const newPanX = mouseX - (mouseX - panOffset.x) * (newZoom / zoom);
-        const newPanY = mouseY - (mouseY - panOffset.y) * (newZoom / zoom);
+        const newPanX = panOffset.x// - mouseX * (newZoom / zoom);
+        const newPanY = panOffset.y //* (newZoom / zoom);
 
         setZoom(newZoom);
         setPanOffset({ x: newPanX, y: newPanY });
@@ -455,8 +482,8 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
                     style={{
                         height: selection.height,
                         width: selection.width,
-                        left: selection.coordinates.x,
-                        top: selection.coordinates.y,
+                        left: selection.left,
+                        top: selection.top,
                     }}
                 ></div>
                 <div className="shapes"
@@ -466,6 +493,10 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
                          left: 0,
                          width: '100%',
                          height: '100%',
+                         // top: 0,
+                         // left: 0,
+                         // width: `calc(100% / ${zoom})`,
+                         // height: `calc(100% / ${zoom})`,
                          transform: `scale(${zoom})`,
                          pointerEvents: 'none',
                      }}
@@ -480,7 +511,7 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
                                 left: 0,
                                 transform: `translate(${panOffset.x}px, ${panOffset.y}px)`,
                                 overflow: 'visible',
-                                pointerEvents: mode === ModeType.Select || mode === ModeType.Erase ? 'all' : 'none',
+                                // pointerEvents: mode === ModeType.Select || mode === ModeType.Erase ? 'all' : 'none',
                             }}
                         >
                             <path
