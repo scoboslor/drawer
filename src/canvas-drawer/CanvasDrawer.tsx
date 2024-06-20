@@ -42,6 +42,11 @@ interface Shape {
     path: Path;
     type?: string;
     erase?: boolean;
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    matrix: number[];
 }
 
 interface Selection {
@@ -79,9 +84,15 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
     const [selection, setSelection] = useState<Selection>({ left: 0, top: 0, active: false, coordinates: { x: 0, y: 0 }, height: 0, width: 0 });
 
     const pushShape = useCallback((path: Path) => {
+        const [minX, minY, width, height] = calculateViewBox(path.points).split(" ");
         const shape: Shape = {
             id: Math.random().toString(32).substring(2),
-            path: path
+            path: path,
+            left: minX,
+            top: minY,
+            width: parseInt(width, 10),
+            height: parseInt(height, 10),
+            matrix: [1, 0, 0, 1, 0, 0]
         };
         setShapes([...shapes, shape]);
     }, [shapes]);
@@ -91,15 +102,101 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
         setShapes(filteredShapes);
     }, [shapes]);
 
+    function calculateViewBox(points: Point[]): string {
+        // Initialize min and max values with the first point's coordinates
+        let minX = points[0].x;
+        let minY = points[0].y;
+        let maxX = points[0].x;
+        let maxY = points[0].y;
 
+        // Iterate through the points to find the min and max values
+        for (const point of points) {
+            if (point.x < minX) minX = point.x;
+            if (point.y < minY) minY = point.y;
+            if (point.x > maxX) maxX = point.x;
+            if (point.y > maxY) maxY = point.y;
+        }
+
+        // Calculate width and height
+        const width = maxX - minX;
+        const height = maxY - minY;
+
+        // Return the viewBox attribute as a string
+        return `${minX} ${minY} ${width} ${height}`;
+    }
+
+    // function zoomF(zoom:number) {
+    //     for (const shape of shapes) {
+    //
+    //         const centerX = shape.width / 2;
+    //         const centerY = shape.height / 2;
+    //
+    //         const matrix:number[] = shape.matrix as number[];
+    //
+    //         for (var i = 0; i < 4; i++) {
+    //             matrix[i] *= zoom;
+    //         }
+    //
+    //         matrix[4] += (1 - zoom) * centerX;
+    //         matrix[5] += (1 - zoom) * centerY;
+    //
+    //         shape.matrix = matrix;
+    //         console.log(shape)
+    //     }
+    // }
+    const zoomF = useCallback((zoom) => {
+        const newShapes = shapes.map(shape => {
+            const centerX = shape.width / 2;
+            const centerY = shape.height / 2;
+
+            const matrix = [...shape.matrix];
+
+            // Scale the transformation matrix
+            for (let i = 0; i < 4; i++) {
+                matrix[i] *= zoom;
+            }
+
+            // Update translation to keep the shape centered
+            matrix[4] = matrix[4] * zoom + (1 - zoom) * centerX;
+            matrix[5] = matrix[5] * zoom + (1 - zoom) * centerY;
+
+            return { ...shape, matrix };
+        });
+
+        setShapes(newShapes); // Update state to trigger re-render
+    }, [shapes]);
+
+    const panF = (dx:number, dy:number) => {
+        /*
+            const dx = (event.clientX - startPos.x) / zoom;
+            const dy = (event.clientY - startPos.y) / zoom;
+            setPanOffset(prev => ({x: prev.x + dx, y: prev.y + dy}));
+            setStartPos({x: event.clientX, y: event.clientY});
+         */
+
+        const newShapes = shapes.map(shape => {
+            const matrix = [...shape.matrix];
+
+            matrix[4] += dx;
+            matrix[5] += dy;
+
+            return { ...shape, matrix };
+        });
+
+        setShapes(newShapes); // Update state to trigger re-render
+    };
+
+    // useEffect(() => {
+    //     panF(panOffset.x, panOffset.y);
+    // }, [panOffset]);
 
     const handleMouseDown = useCallback((event: MouseEvent) => {
         // console.log(event)
         const target = event.target as HTMLDivElement;
         if (target.closest('.config')) return;
         const {offsetX, offsetY} = event as any;
-        const adjustedX = offsetX - panOffset.x;
-        const adjustedY = offsetY - panOffset.y;
+        const adjustedX = (offsetX - panOffset.x) / zoom;
+        const adjustedY = (offsetY - panOffset.y) / zoom;
 
         // console.log(color)
 
@@ -128,7 +225,7 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
                 });
             }
         }
-    }, [color, lineWidth, mode, panOffset.x, panOffset.y, selection]);
+    }, [color, lineWidth, mode, panOffset, selection]);
 
     const handleMouseUp = useCallback(() => {
         if (currentPath) {
@@ -161,36 +258,11 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
         const adjustedY = offsetY - panOffset.y;
 
         if (mode === ModeType.Draw && shiftKey && currentPath) {
-            // OPT 1: continue the drawing with a straight line
-            // if (!straightPath.start) {
-            //     straightPath.start = { x: adjustedX, y: adjustedY };
-            //     console.log(paths)
-            //     if (paths && currentPath) {
-            //         setPaths([...paths, currentPath]);
-            //     }
-            //     setCurrentPath(null);
-            // }
-            // straightPath.end = { x: adjustedX, y: adjustedY };
-            //
-            // const { start, end } = straightPath;
-            // const newPath: Path = { color, lineWidth, points: [start, end] };
-            // setCurrentPath(newPath);
-
-            // OPT 2: replace the current line with a straight line
-            /*if (!straightPath.start) {
-                straightPath.start = currentPath.points[0];
-                setCurrentPath(null);
-            }
-            straightPath.end = { x: adjustedX, y: adjustedY };
-
-            const { start, end } = straightPath;
-            const newPath: Path = { color, lineWidth, points: [start, end] };
-            setCurrentPath(newPath); */
             if (!straightPath.start) {
                 straightPath.start = currentPath.points[0];
                 setCurrentPath(null);
             }
-            straightPath.end = {x: adjustedX, y: adjustedY};
+            straightPath.end = { x: adjustedX, y: adjustedY };
 
             const {start, end} = straightPath;
 
@@ -205,9 +277,10 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
             setCurrentPath(newPath);
 
         } else if (mode === ModeType.Draw && currentPath && event.buttons === 1) {
-            if (straightPath.originalPath) {
-                setCurrentPath(straightPath.originalPath)
+            if (straightPath.originalPath) { // if shift release reset original path
+                setCurrentPath(straightPath.originalPath);
             }
+            console.log(adjustedX, adjustedX / zoom);
             const newPath = {...currentPath, points: [...currentPath.points, {x: adjustedX, y: adjustedY}]};
             setCurrentPath(newPath);
 
@@ -217,6 +290,8 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
             const dy = (event.clientY - startPos.y) / zoom;
             setPanOffset(prev => ({x: prev.x + dx, y: prev.y + dy}));
             setStartPos({x: event.clientX, y: event.clientY});
+            // panF(dx, dy);
+            // setStartPos({x: event.clientX, y: event.clientY});
 
         } else if (mode === ModeType.Erase && event.buttons === 1) {
             const target:EventTarget = event.target as EventTarget;
@@ -230,8 +305,6 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
             shape.erase = true;
 
         } else if (mode === ModeType.Select && selection.active) {
-            console.log(selection)
-
             const { x, y } = selection.coordinates;
             let width:number = 0;
             let height:number = 0;
@@ -257,8 +330,36 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
                 left
             });
         }
+        // if (mode === ModeType.Select && selection.active) {
+        //     const { x, y } = selection.coordinates;
+        //     let width:number = 0;
+        //     let height:number = 0;
+        //     let top:number = y;
+        //     let left:number = x;
+        //     console.log(adjustedX)
+        //     if (adjustedX + panOffset.x < x) {
+        //         left = offsetX;
+        //         width = x - offsetX;
+        //     } else {
+        //         width = offsetX - x;
+        //     }
+        //     if (adjustedY + panOffset.y < y) {
+        //         top = offsetY + panOffset.y;
+        //         height = y - offsetY + panOffset.y;
+        //     } else {
+        //         console.log(2)
+        //         height = offsetY - y;
+        //     }
+        //     setSelection({
+        //         ...selection,
+        //         width,
+        //         height,
+        //         top,
+        //         left
+        //     });
+        // }
 
-    }, [color, currentPath, lineWidth, mode, panOffset.x, panOffset.y, selection, shapes, startPos, straightPath, zoom]);
+    }, [color, currentPath, lineWidth, mode, panOffset, selection, shapes, startPos, straightPath, zoom]);
 
     const handleKeyDown = useCallback((event: KeyboardEvent) => {
         const {key, code, ctrlKey} = event;
@@ -277,6 +378,18 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
 
         } else if (code === 'Space') {
             setMode(ModeType.Pan);
+
+        } else if (code === 'KeyI') {
+            const eyeDropper = new EyeDropper();
+
+            eyeDropper
+                .open()
+                .then((result) => {
+                    setColor(result.sRGBHex)
+                })
+                .catch((e) => {
+                    console.log(e);
+                });
 
         } else if (code === 'Backquote') {
             setUIvisibility(!UIvisibility);
@@ -314,39 +427,95 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
         }
     }, [currentPath, mode, straightPath.originalPath]);
 
+    const handleZoom = useCallback((event: WheelEvent) => {
+        event.preventDefault();
+
+        console.log(event)
+
+        if (event.altKey) {
+            let factor: number = 1;
+
+            if (event.shiftKey) {
+                factor = 5;
+            } else if (event.ctrlKey) {
+                factor = 10;
+            }
+
+            setLineWidth(prevState => prevState - factor * Math.sign(event.deltaY));
+
+        } else if (event.ctrlKey) {
+            // const { offsetX, offsetY, deltaY } = event;
+            //
+            // // Calculate new zoom level
+            // const newZoom = Math.max(0.1, zoom + (-deltaY / 10000 * maxZoom));
+            //
+            // // Calculate the new pan offset to keep the zoom centered around the mouse position
+            // const zoomFactor = newZoom / zoom;
+            // // const newPanX = offsetX - (offsetX - panOffset.x) * zoomFactor;
+            // // const newPanY = offsetY - (offsetY - panOffset.y) * zoomFactor;
+            //
+            // const newPanX = (offsetX - panOffset.x) * zoomFactor;
+            // const newPanY = (offsetY - panOffset.y) * zoomFactor;
+            //
+            // // use zoomF but with factor i.e : -0.25/0.25 etc
+            //
+            // setZoom(newZoom);
+            // setPanOffset({ x: newPanX, y: newPanY });
+
+
+            event.preventDefault();
+
+            const scaleFactor = 1.1;
+            const zoomIn = event.deltaY < 0;
+            const newZoom = Math.min(maxZoom, Math.max(0.1, zoomIn ? zoom * scaleFactor : zoom / scaleFactor));
+
+            const mouseX = event.clientX;
+            const mouseY = event.clientY;
+
+            // Adjust the pan offset to keep the zoom centered around the mouse position
+            // const newPanX = (window.innerWidth / 2) - mouseX - panOffset.x;
+            // const newPanY = (window.innerHeight / 2) - mouseY - panOffset.y;
+            //
+            // Fix the pan (right now alternates from the target to the center)
+            const newPanX = (window.innerWidth / 2) - mouseX - panOffset.x * scaleFactor;
+            const newPanY = (window.innerHeight / 2) - mouseY - panOffset.y * scaleFactor;
+
+            console.log(newZoom)
+
+            zoomF(zoomIn ? newZoom : 1 / newZoom);
+            setZoom(newZoom);
+            setPanOffset({ x: newPanX, y: newPanY });
+
+        } else if (event.shiftKey) {
+            setPanOffset({ x: panOffset.x - event.deltaY, y: panOffset.y - event.deltaX})
+
+        } else  {
+            setPanOffset({ x: panOffset.x - event.deltaX, y: panOffset.y - event.deltaY})
+        }
+
+
+    }, [panOffset, zoom, zoomF]);
+
+
     // const handleZoom = useCallback((event: WheelEvent) => {
     //     event.preventDefault();
     //
-    //     const { offsetX, offsetY, deltaY } = event;
+    //     const scaleFactor = 1.1;
+    //     const zoomIn = event.deltaY < 0;
+    //     const newZoom = Math.min(maxZoom, Math.max(0.1, zoomIn ? zoom * scaleFactor : zoom / scaleFactor));
     //
-    //     // Calculate new zoom level
-    //     const newZoom = Math.max(0.1, zoom + (-deltaY / 10000 * 8));
+    //     const mouseX = event.clientX;
+    //     const mouseY = event.clientY;
     //
-    //     // Calculate the new pan offset to keep the zoom centered around the mouse position
-    //     const zoomFactor = newZoom / zoom;
-    //     const newPanX = offsetX - (offsetX - panOffset.x) * zoomFactor;
-    //     const newPanY = offsetY - (offsetY - panOffset.y) * zoomFactor;
+    //     // Adjust the pan offset to keep the zoom centered around the mouse position
+    //     const newPanX = (window.innerWidth / 2) - mouseX - panOffset.x;
+    //     const newPanY = (window.innerHeight / 2) - mouseY - panOffset.y;
     //
     //     setZoom(newZoom);
     //     setPanOffset({ x: newPanX, y: newPanY });
     // }, [panOffset, zoom]);
-    const handleZoom = useCallback((event: WheelEvent) => {
-        event.preventDefault();
 
-        const scaleFactor = 1.1;
-        const zoomIn = event.deltaY < 0;
-        const newZoom = Math.min(maxZoom, Math.max(0.1, zoomIn ? zoom * scaleFactor : zoom / scaleFactor));
 
-        const mouseX = event.clientX;
-        const mouseY = event.clientY;
-
-        // Adjust the pan offset to keep the zoom centered around the mouse position
-        const newPanX = panOffset.x// - mouseX * (newZoom / zoom);
-        const newPanY = panOffset.y //* (newZoom / zoom);
-
-        setZoom(newZoom);
-        setPanOffset({ x: newPanX, y: newPanY });
-    }, [panOffset, zoom]);
 
 
     // Add event listeners to the window
@@ -417,7 +586,7 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
             {!hideUI && (
                 <div
                      className={UIvisibility ? "config hidden" : "config"}
-                     style={{pointerEvents: currentPath ? 'none' : 'all'}}>
+                     style={{pointerEvents: (currentPath || selection.active) ? 'none' : 'all'}}>
                     <div>
                         <label
                             style={{
@@ -451,6 +620,10 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
                                 </div>
                             </div>
                         </label>
+                        <div>
+                            <button onClick={() => zoomF(1.2)}>+</button>
+                            <button onClick={() => zoomF(0.8)}>-</button>
+                        </div>
                         <div
                             style={{
                                 display: 'flex',
@@ -459,7 +632,8 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
                             }}>
                             Mode:
                             {Object.values(ModeType).map((modeType, idx) => (
-                                <button className={mode === modeType ? "selected toolBtn" : "toolBtn"} title={modeType.toUpperCase()[0] + modeType.substring(1) + " - " + ModeKeyCodes[modeType]}
+                                <button className={mode === modeType ? "selected toolBtn" : "toolBtn"}
+                                        title={modeType.toUpperCase()[0] + modeType.substring(1) + " - " + ModeKeyCodes[modeType]}
                                         key={idx} onClick={() => setMode(modeType)}
                                         dangerouslySetInnerHTML={{__html: optionIcons[modeType]}}></button>
                             ))}
@@ -474,7 +648,8 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
                      width: '100%',
                      height: '100%',
                      position: 'relative',
-                     backgroundPosition: `${panOffset.x}px ${panOffset.y}px`
+                     backgroundPosition: `${panOffset.x}px ${panOffset.y}px`,
+                     backgroundSize: 18.5 * zoom
                  }}
             >
                 <div
@@ -488,73 +663,134 @@ const CanvasDrawer: React.FC<CanvasDrawerProps> = ({width, height, hideUI = fals
                 ></div>
                 <div className="shapes"
                      style={{
+                         // position: 'absolute',
+                         // top: 0,
+                         // left: 0,
+                         // width: '100%',
+                         // height: '100%',
+                         // // top: '-49%',
+                         // // left: '-49%',
+                         // // width: `calc(100% / ${zoom})`,
+                         // // height: `calc(100% / ${zoom})`,
+                         // // transform: `scale(${zoom})`,
+                         // pointerEvents: 'none',
                          position: 'absolute',
                          top: 0,
                          left: 0,
-                         width: '100%',
-                         height: '100%',
-                         // top: 0,
-                         // left: 0,
-                         // width: `calc(100% / ${zoom})`,
-                         // height: `calc(100% / ${zoom})`,
-                         transform: `scale(${zoom})`,
-                         pointerEvents: 'none',
+                         width: '1px',
+                         height: '1px',
+                         contain: 'layout style size',
+                         transform: `scale(${zoom}) translate(${panOffset.x}px, ${panOffset.y}px)`,
                      }}
                 >
                     {shapes.map((shape, index) => (
-                        <svg
-                            key={index}
-                            data-shape-id={shape.id}
-                            style={{
-                                position: 'absolute',
-                                top: 0,
-                                left: 0,
-                                transform: `translate(${panOffset.x}px, ${panOffset.y}px)`,
-                                overflow: 'visible',
-                                // pointerEvents: mode === ModeType.Select || mode === ModeType.Erase ? 'all' : 'none',
-                            }}
+                        <div key={index}
+                             className="shape"
+                             style={{
+                                 position: 'absolute',
+                                 overflow: 'visible',
+                                 contain: 'size layout',
+                                 width: shape.width,
+                                 height: shape.height,
+                             }}
                         >
-                            <path
-                                className="shape"
-                                d={createPathData(shape.path.points)}
-                                stroke={shape.path.color}
-                                strokeWidth={shape.path.lineWidth}
-                                fill="none"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                            />
-                            <path
-                                className="shape-outline"
-                                d={createPathData(shape.path.points)}
-                                stroke='#2A5FA5'
-                                strokeWidth={variableStrokeWidth} // todo change variable with zoom
-                                fill="none"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                            />
-                        </svg>
+                            <svg
+                                key={index}
+                                data-shape-id={shape.id}
+                                data-shape-width={shape.width}
+                                data-shape-height={shape.height}
+                                style={{
+                                    position: 'absolute',
+                                    top: 0,
+                                    right: 0,
+                                    bottom: 0,
+                                    left: 0,
+                                    width: '100%',
+                                    height: '100%',
+                                    // transform: `translate(${panOffset.x}px, ${panOffset.y}px)`,
+                                    overflow: 'visible',
+                                    pointerEvents: mode === ModeType.Select || mode === ModeType.Erase ? 'all' : 'none',
+                                }}
+                            >
+                                <g>{/*<g transform={"matrix(" + shape.matrix.join(" ") + ")" }>*/}
+                                    <path
+                                        className="shape"
+                                        d={createPathData(shape.path.points)}
+                                        stroke={shape.path.color}
+                                        strokeWidth={shape.path.lineWidth}
+                                        fill="none"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                    />
+                                    <path
+                                        className="shape-outline"
+                                        d={createPathData(shape.path.points)}
+                                        stroke='#2A5FA5'
+                                        strokeWidth={variableStrokeWidth} // todo change variable with zoom
+                                        fill="none"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                    />
+                                </g>
+                            </svg>
+                        </div>
                     ))}
                     {currentPath && (
-                        <svg
-                            style={{
-                                position: 'absolute',
-                                top: 0,
-                                left: 0,
-                                width: '100%',
-                                height: '100%',
-                                transform: `translate(${panOffset.x}px, ${panOffset.y}px)`,
-                                overflow: 'visible'
-                            }}
+                        // <svg
+                        //     style={{
+                        //         position: 'absolute',
+                        //         top: 0,
+                        //         left: 0,
+                        //         width: '100%',
+                        //         height: '100%',
+                        //         transform: `translate(${panOffset.x}px, ${panOffset.y}px)`,
+                        //         overflow: 'visible'
+                        //     }}
+                        // >
+                        //     <path
+                        //         d={createPathData(currentPath.points)}
+                        //         stroke={currentPath.color}
+                        //         strokeWidth={currentPath.lineWidth}
+                        //         fill="none"
+                        //         strokeLinecap="round"
+                        //         strokeLinejoin="round"
+                        //     />
+                        // </svg>
+                        <div
+                             className="shape"
+                             style={{
+                                 position: 'absolute',
+                                 overflow: 'visible',
+                                 contain: 'size layout',
+                                 width: `${calculateViewBox(currentPath.points).split(" ")[2]}px`,
+                                 height: `${calculateViewBox(currentPath.points).split(" ")[3]}px`,
+                             }}
                         >
-                            <path
-                                d={createPathData(currentPath.points)}
-                                stroke={currentPath.color}
-                                strokeWidth={currentPath.lineWidth}
-                                fill="none"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                            />
-                        </svg>
+                            <svg
+                                style={{
+                                    position: 'absolute',
+                                    top: 0,
+                                    right: 0,
+                                    bottom: 0,
+                                    left: 0,
+                                    width: '100%',
+                                    height: '100%',
+                                    // transform: `translate(${panOffset.x}px, ${panOffset.y}px)`,
+                                    overflow: 'visible',
+                                    pointerEvents: mode === ModeType.Select || mode === ModeType.Erase ? 'all' : 'none',
+                                }}
+                            >
+                                    <path
+                                        className="shape"
+                                        d={createPathData(currentPath.points)}
+                                        stroke={currentPath.color}
+                                        strokeWidth={currentPath.lineWidth}
+                                        fill="none"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                    />
+                            </svg>
+                        </div>
                     )}
                 </div>
             </div>
